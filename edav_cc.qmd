@@ -1,0 +1,236 @@
+---
+title: "cc_final"
+format: html
+editor: visual
+---
+
+## EDAV Community Contribution
+
+This quick video covers **community detection in network-based data** using R.
+
+## Existing Resources
+
+If you search for "interactive community detection r code", you’ll find helpful resources - however, real-world applications can differ from the perfectly constructed toy examples. Common challenges in using these resources include:
+
+-   Limited guidance on data preparation requirements
+
+    -   <https://isc.sans.edu/diary/25390>
+
+-   Lack of explanations for algorithm choices
+
+    -   <https://rpubs.com/bahadirhanfiliz/723515>
+
+-   Limited focus on interactive visualization integration
+
+    -   <https://cran.r-project.org/web/packages/gsbm/vignettes/les_miserables.html>
+
+This video aims to bridge these gaps, guiding you to:
+
+-   Prepare data for graph analysis
+
+-   Apply community detection
+
+-   Visualize networks interactively
+
+## Packages
+
+In this project, we use:
+
+**`igraph`** - Creates our network object and performs community detection analysis
+
+**`visNetwork`** - Generates an interactive visualization of our network
+
+```{r}
+library(xml2)
+library(igraph)
+library(visNetwork)
+```
+
+## Data
+
+In this demonstration, we will be using data based on the influence and relationships of characters from Victor Hugo's novel, *Les Misérables*.
+
+However, instead of downloading this data from standard packages to load into our graph packages directly, we will opt to download a more raw XML format to show how to transform any data you may have into the requisite format for graph analysis.
+
+XML data download: <http://www.casos.cs.cmu.edu/computational_tools/datasets/external/lesmis/>
+
+```{r}
+# Read XML data file
+xml_data <- read_xml("lesmis.xml")
+```
+
+Example data:
+
+\<DynamicNetwork\> \<MetaNetwork\> \<nodes\> \<nodeclass id="agent" type="agent"\> \<node id="0" title="Myriel"/\> \<node id="1" title="Napoleon"/\> \<node id="2" title="MlleBaptistine"/\> \</nodeclass\> \</nodes\> \<networks\> \<network id="agent x agent" isDirected="true" source="agent" target="agent"\> \<link source="1" target="0" type="double" value="1"/\> \<link source="2" target="0" type="double" value="8"/\> \<link source="3" target="0" type="double" value="10"/\> \</network\> \</networks\> \</MetaNetwork\> \</DynamicNetwork\>
+
+At a high level, we need a data structure representation of all characters and their names (**nodes**) and also a data structure representation of the relationships between them (**edges**).
+
+To use this data with the `igraph` package, we need to:
+
+1.  Extract node `id` and `title` to create a **nodes** dataframe
+    1.  Nodes dataframe should have an ID column as its first column
+2.  Extract `source` and `target` from `<link>` to create an **edges** dataframe
+    1.  If your graph is directed, the source should be the first column, and the target should be the second column.
+3.  Feed these dataframes into `igraph`'s `graph_from_data_frame()` to build the graph
+
+```{r}
+# Extract nodes (characters)
+nodes <- xml_find_all(xml_data, ".//node")
+node_ids <- xml_attr(nodes, "id")
+node_titles <- xml_attr(nodes, "title")
+
+# Extract edges (relationships)
+links <- xml_find_all(xml_data, ".//link")
+source_ids <- xml_attr(links, "source")
+target_ids <- xml_attr(links, "target")
+
+# Create node dataframe
+node_df <- data.frame(id = node_ids, title = node_titles)
+
+# Create edge dataframe
+edge_df <- data.frame(from = source_ids, to = target_ids)
+
+# Create graph
+graph <- graph_from_data_frame(edge_df, vertices = node_df, directed = TRUE)
+```
+
+```{r}
+node_df
+```
+
+```{r}
+edge_df
+```
+
+## Community Detection
+
+Now that we have the ready-to-use `igraph` object, we can begin the community detection analysis.
+
+**Community detection** identifies groups of tightly connected nodes in a network, revealing underlying structures.
+
+Let's start by examining appropriate choices for community detection. The `igraph` package offers several algorithms for this task.
+
+`igraph` docs: <https://igraph.org/r/doc/>
+
+![](images/clipboard-675644234.png)
+
+Since there are so many options, it can be overwhelming to decide which one is best for your use case. For that reason, here are some high-level tips for the common algorithms.
+
+-   If you have **large** **undirected graphs:** `cluster_fast_greedy`
+
+-   If you have **small undirected graphs**: `cluster_edge_betweeness`
+
+-   In general, for **undirected graphs**: `cluster_leiden`, `cluster_louvain`
+
+-   In general, for **directed graphs:** `cluster_walktrap` , `cluster_infomap`,
+
+Algorithm selection:
+
+-   <https://www.r-bloggers.com/2012/06/summary-of-community-detection-algorithms-in-igraph-0-6/>
+
+-   <https://stackoverflow.com/questions/9471906/what-are-the-differences-between-community-detection-algorithms-in-igraph>
+
+Since we have a **directed graph** in this example, we can choose to use the `cluster_walktrap` algorithm.
+
+All the community detection algorithms from `igraph` return a `community` object. We can access the community assignments from the algorithm with `membership(community)`.
+
+Note that we use `V(graph)` to access the vertex, or node information of the entire graph.
+
+```{r}
+# Run igraph community detection
+community <- cluster_walktrap(graph)
+
+# Add community information to each node
+V(graph)$community <- membership(community)
+```
+
+## Interactive Visualization
+
+Now we can start to visualize the graph and relationships.
+
+To easily work with the `visNetwork` package, we will create a new node dataframe with columns, specifically called `id` , `label` , `group` , as `visNetwork` expects these names.
+
+```{r}
+# Create new node dataframe to include the detected community information
+community_node_df <- data.frame(id = V(graph)$name, 
+                       label = V(graph)$title, 
+                       group = V(graph)$community)
+
+```
+
+We can reuse our edge dataframe from before.
+
+```{r}
+community_node_df
+```
+
+```{r}
+edge_df
+```
+
+Now we can visualize and perform qualitative analysis.
+
+```{r}
+# Make interactive plot
+visNetwork(community_node_df, edge_df, width = "100%", main = "Les Misérables Character Influence Network", 
+           submain = "Community Detection with Interactive Visualization") |>
+  visOptions(highlightNearest = TRUE, nodesIdSelection = TRUE
+             , manipulation = TRUE) |>
+  visGroups(groupname = unique(community_node_df$group)) |>
+  visPhysics(stabilization = TRUE) |>
+  visEdges(arrows = 'from') |>
+  visLegend() |>
+  addFontAwesome()
+```
+
+We can also view the data from a hierarchical perspective.
+
+```{r}
+# Make interactive plot
+visNetwork(community_node_df, edge_df, width = "100%", main = "Les Misérables Hierachical Character Network", 
+           submain = "Community Detection with Interactive Visualization") |>
+  visOptions(highlightNearest = TRUE, nodesIdSelection = TRUE
+             , manipulation = TRUE) |>
+  visGroups(groupname = unique(community_node_df$group)) |>
+  visPhysics(stabilization = TRUE) |>
+  visEdges(arrows = 'from') |>
+  visLegend() |>
+  addFontAwesome() |>
+  visHierarchicalLayout()
+```
+
+## References
+
+Community Detection/Interactive Network Code Examples
+
+-   <https://isc.sans.edu/diary/25390>
+
+-   <https://rpubs.com/bahadirhanfiliz/723515>
+
+-   <https://cran.r-project.org/web/packages/gsbm/vignettes/les_miserables.html>
+
+Data
+
+-   <http://www.casos.cs.cmu.edu/computational_tools/datasets/external/lesmis/>
+
+XML Parsing
+
+-   <https://xml2.r-lib.org/>
+
+Community Detection
+
+-   <https://igraph.org/r/doc/>
+
+-   <https://rpubs.com/writetosamadalvi/CommunityDetection>
+
+-   <https://r.igraph.org/reference/communities.html>
+
+-   <https://www.r-bloggers.com/2012/06/summary-of-community-detection-algorithms-in-igraph-0-6/>
+
+-   <https://stackoverflow.com/questions/9471906/what-are-the-differences-between-community-detection-algorithms-in-igraph>
+
+Interactive Visualization
+
+-   <https://cran.r-project.org/web/packages/visNetwork/vignettes/Introduction-to-visNetwork.html>
+
+## 
